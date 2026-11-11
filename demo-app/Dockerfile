@@ -2,11 +2,13 @@ FROM python:3.12-slim
 
 # Pick up security fixes for the base image's system packages and for pip itself.
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade pip setuptools
+    && pip install --no-cache-dir --only-binary :all: pip==26.3 setuptools==84.2.1
 
 WORKDIR /srv
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.lock has the exact version of every package (made from requirements.txt).
+# --only-binary stops pip from running a package's own setup script during install.
+COPY requirements.lock .
+RUN pip install --no-cache-dir --only-binary :all: -r requirements.lock
 COPY app ./app
 
 # Do not run as root inside the container.

@@ -39,12 +39,12 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
   fi
   sleep 2
 done
-[ -n "$HEALTHY" ] || rollback "/health did not answer"
+[[ -n "$HEALTHY" ]] || rollback "/health did not answer"
 
 ERRORS=0
 for request in $(seq 1 "$SMOKE_REQUESTS"); do
   CODE="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/quote?amount=1000&coupon=WELCOME10")"
-  [ "$CODE" = "200" ] || ERRORS=$((ERRORS + 1))
+  [[ "$CODE" = "200" ]] || ERRORS=$((ERRORS + 1))
 done
 echo "smoke test: ${ERRORS} errors in ${SMOKE_REQUESTS} requests"
-[ "$ERRORS" -eq 0 ] || rollback "smoke test had ${ERRORS} errors"
+[[ "$ERRORS" -eq 0 ]] || rollback "smoke test had ${ERRORS} errors"

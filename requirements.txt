@@ -1,3 +1,22 @@
-requests
-pyyaml
-pytest
+certifi==2026.10.23
+    # via requests
+charset-normalizer==3.5.2
+    # via requests
+idna==3.20
+    # via requests
+iniconfig==2.3.1
+    # via pytest
+packaging==26.3
+    # via pytest
+pluggy==1.7.0
+    # via pytest
+pygments==2.21.0
+    # via pytest
+pytest==9.2.0
+    # via -r requirements.in
+pyyaml==6.0.3
+    # via -r requirements.in
+requests==2.34.2
+    # via -r requirements.in
+urllib3==2.8.0
+    # via requests

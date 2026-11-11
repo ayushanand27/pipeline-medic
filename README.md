@@ -145,6 +145,24 @@ Example client config (stdio):
 }
 ```
 
+## Dependencies
+
+Every install uses exact versions, so a build today and a build next month get the same packages.
+
+- `requirements.txt`, `requirements-mcp.txt` and `requirements-scan.txt` are generated from the matching `.in` files.
+- The Docker image installs from `demo-app/requirements.lock`, generated from `demo-app/requirements.txt`. A CI job fails if the two drift apart.
+- Installs use `--only-binary :all:`, so pip never runs a package's own setup script.
+
+Refresh after changing a dependency:
+
+```bash
+pip install uv
+uv pip compile requirements.in --python-version 3.12 --no-header -o requirements.txt
+uv pip compile demo-app/requirements.txt --python-version 3.12 --no-header -o demo-app/requirements.lock
+```
+
+`demo-ci` installs from the loose `demo-app/requirements.txt` on purpose. That file is what the planted bugs break and what the agent repairs.
+
 ## Layout
 
 ```
@@ -158,7 +176,7 @@ medic/                 the agent
   mcp_server.py        the same abilities as MCP tools
   triage.py            merge, de-duplicate and rank scanner reports
 policy/                OPA rules for a release, with their own tests
-tests/                 57 tests, with real captured failure logs as fixtures
+tests/                 62 tests, with real captured failure logs as fixtures
 demo-app/              small FastAPI service the pipeline builds, tests and deploys
 deploy/                Terraform (cluster), Kubernetes manifests (app + Prometheus), deploy, verify, metric check and rollback drill scripts
 scripts/plant_bug.py   breaks the demo app on purpose, three ways
@@ -167,7 +185,7 @@ scripts/plant_bug.py   breaks the demo app on purpose, three ways
 
 ## Tests
 
-- **57 agent tests.** Log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, the whole loop against a fake GitHub, the triage and exploit ranking, the metric check, and the MCP server through a real MCP client.
+- **62 agent tests.** Log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, the whole loop against a fake GitHub, the triage and exploit ranking, the metric check, the file-path checks, and the MCP server through a real MCP client.
 - **10 policy tests.** One for a good release and one for each rule.
 - **11 demo app tests.** Price rules, the HTTP API and the metrics.
 - **In the pipeline itself.** The rollback drill runs on every deploy.

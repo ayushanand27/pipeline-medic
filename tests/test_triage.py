@@ -1,6 +1,8 @@
 import json
 
-from medic.triage import EPSS_URL, KEV_URL, enrich, from_bandit, from_leakkill, from_trivy, main, merge, summarize
+import pytest
+
+from medic.triage import EPSS_URL, KEV_URL, enrich, safe_path, from_bandit, from_leakkill, from_trivy, main, merge, summarize
 
 
 def trivy_report(target: str, *vulns: dict) -> dict:
@@ -69,7 +71,8 @@ def test_empty_reports_do_not_crash():
     assert summarize(0, [])["unique_findings"] == 0
 
 
-def test_command_line_writes_summary_and_report(tmp_path):
+def test_command_line_writes_summary_and_report(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     (tmp_path / "a.json").write_text(json.dumps(trivy_report("image", vuln("CVE-1", "HIGH", "2.0"))))
     (tmp_path / "b.json").write_text(json.dumps(trivy_report("fs", vuln("CVE-1", "HIGH", "2.0"))))
     (tmp_path / "secrets.json").write_text("[]")
@@ -121,3 +124,21 @@ def test_exploit_sources_being_down_is_not_fatal():
     assert len(problems) == 2
     assert findings[0].known_exploited is False and findings[0].epss is None
     assert [f.id for f in merge(findings)] == ["CVE-1"]
+
+
+@pytest.mark.parametrize("path", ["../outside.json", "/etc/passwd", "reports/../../outside.json"])
+def test_paths_outside_the_working_directory_are_refused(tmp_path, monkeypatch, path):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit):
+        safe_path(path)
+
+
+def test_paths_inside_the_working_directory_are_allowed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert safe_path("reports/security.json") == tmp_path.resolve() / "reports" / "security.json"
+
+
+def test_command_line_refuses_to_write_outside(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit):
+        main(["--out", "../security.json"])

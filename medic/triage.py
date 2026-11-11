@@ -19,6 +19,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -213,8 +214,21 @@ def render_markdown(summary: dict, limit: int = 15) -> str:
     return "\n".join(lines) + "\n"
 
 
+def safe_path(path: str) -> Path:
+    """Only allow files inside the folder the command runs in.
+
+    The paths come from the command line. Without this check, a wrong or hostile argument
+    like ../../etc/passwd could make the tool read or overwrite files elsewhere on the machine.
+    """
+    base = os.path.realpath(os.getcwd())
+    full = os.path.realpath(path)
+    if full != base and not full.startswith(base + os.sep):
+        raise SystemExit(f"refusing to use '{path}': it is outside the working directory")
+    return Path(full)
+
+
 def _load(path: str):
-    text = Path(path).read_text(encoding="utf-8").strip()
+    text = safe_path(path).read_text(encoding="utf-8").strip()
     return json.loads(text) if text else {}
 
 
@@ -241,10 +255,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"medic.triage: {problem}", file=sys.stderr)
 
     summary = summarize(len(raw), merge(raw))
-    Path(args.out).write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    safe_path(args.out).write_text(json.dumps(summary, indent=2), encoding="utf-8")
     report = render_markdown(summary)
     if args.report:
-        Path(args.report).write_text(report, encoding="utf-8")
+        safe_path(args.report).write_text(report, encoding="utf-8")
     print(report)
     return 0
 

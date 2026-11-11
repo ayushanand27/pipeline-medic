@@ -93,12 +93,13 @@ git checkout demo-app/requirements.txt
    - Trivy: known vulnerabilities in the image and in the dependencies.
    - Bandit: risky patterns in the Python code.
    - [LeakKill](https://github.com/ayushanand27/leakkill): secrets committed to the repo.
-3. **Triage.** `medic/triage.py` merges the three reports, removes duplicates (the same CVE reported for the same package by two scans counts once) and ranks them: worst severity first, and fixable before not fixable. The result is shown on the run's summary page.
-4. **Policy gate.** Open Policy Agent checks `policy/deploy.rego`. The release is stopped if a container has no resource limits, no readiness probe, no fixed image tag, runs privileged or has fewer than 2 replicas, or if the triage found a secret or a critical vulnerability that has a fix.
+3. **Triage.** `medic/triage.py` merges the three reports and removes duplicates (the same CVE reported for the same package by two scans counts once). It then adds exploit data from two public sources: the CISA KEV list (vulnerabilities being attacked right now) and EPSS (the chance of attack in the next 30 days). The ranking is: exploited now, then severity, then EPSS, then fixable before not fixable. The result is shown on the run's summary page.
+4. **Policy gate.** Open Policy Agent checks `policy/deploy.rego`. The release is stopped if a container has no resource limits, no readiness probe, no fixed image tag, runs privileged or has fewer than 2 replicas, or if the triage found a secret, a critical vulnerability that has a fix, or any vulnerability that is being exploited right now and has a fix.
 5. **Cluster.** `terraform apply` creates a Kubernetes cluster ([kind](https://kind.sigs.k8s.io/), Kubernetes inside Docker). It lives inside the CI runner, so it costs nothing.
 6. **Deploy.** Applies the manifests: 2 replicas, rolling update with `maxUnavailable: 0`, readiness and liveness probes, CPU and memory limits.
 7. **Verify.** `verify.sh` waits for the rollout, calls `/health`, then sends 20 real requests and allows zero errors. If anything fails it runs `kubectl rollout undo`.
-8. **Rollback drill.** On every run the pipeline ships a broken release on purpose and checks that it is caught and rolled back, and that the good version is still serving. So the rollback is tested, not assumed.
+8. **Metric check.** Prometheus runs in the cluster and collects a request counter from every pod. The pipeline asks it for the error rate of the new release and rolls back if more than 1% of requests are server errors.
+9. **Rollback drill.** On every run the pipeline ships a broken release on purpose and checks that it is caught and rolled back, and that the good version is still serving. So the rollback is tested, not assumed.
 
 Run it on your own machine (needs Docker, kind, kubectl and Terraform):
 
@@ -107,7 +108,8 @@ docker build -t demo-app:local demo-app
 terraform -chdir=deploy/terraform init && terraform -chdir=deploy/terraform apply -auto-approve
 export KUBECONFIG="$(terraform -chdir=deploy/terraform output -raw kubeconfig_path)"
 kind load docker-image demo-app:local --name pipeline-medic
-./deploy/deploy.sh demo-app:local && ./deploy/verify.sh
+./deploy/deploy.sh demo-app:local && kubectl apply -f deploy/k8s/prometheus.yaml
+./deploy/verify.sh && ./deploy/metrics_check.sh
 ./deploy/rollback_drill.sh
 terraform -chdir=deploy/terraform destroy -auto-approve    # clean up
 ```
@@ -156,18 +158,18 @@ medic/                 the agent
   mcp_server.py        the same abilities as MCP tools
   triage.py            merge, de-duplicate and rank scanner reports
 policy/                OPA rules for a release, with their own tests
-tests/                 51 tests, with real captured failure logs as fixtures
+tests/                 57 tests, with real captured failure logs as fixtures
 demo-app/              small FastAPI service the pipeline builds, tests and deploys
-deploy/                Terraform (cluster), Kubernetes manifests, deploy, verify and rollback drill scripts
+deploy/                Terraform (cluster), Kubernetes manifests (app + Prometheus), deploy, verify, metric check and rollback drill scripts
 scripts/plant_bug.py   breaks the demo app on purpose, three ways
 .github/workflows/     ci, demo-ci, medic, deploy
 ```
 
 ## Tests
 
-- **51 agent tests.** Log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, the whole loop against a fake GitHub, the triage logic, and the MCP server through a real MCP client.
-- **9 policy tests.** One for a good release and one for each rule.
-- **10 demo app tests.** Price rules and the HTTP API.
+- **57 agent tests.** Log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, the whole loop against a fake GitHub, the triage and exploit ranking, the metric check, and the MCP server through a real MCP client.
+- **10 policy tests.** One for a good release and one for each rule.
+- **11 demo app tests.** Price rules, the HTTP API and the metrics.
 - **In the pipeline itself.** The rollback drill runs on every deploy.
 
 ## Known limits
@@ -176,14 +178,12 @@ scripts/plant_bug.py   breaks the demo app on purpose, three ways
 - The LLM step is tested with recorded answers, not yet against a live model.
 - Only Python projects and pytest output are understood today.
 - The cluster is a local kind cluster, not a cloud cluster (EKS, GKE, AKS).
-- Triage ranks by severity and whether a fix exists. It does not use exploit data such as EPSS or the CISA KEV list.
 - The security gate reports findings. It does not open fix pull requests for them yet.
-- Verification is a health check plus a smoke test. It does not read metrics from a monitoring system.
+- The metric check looks at the error rate only. It does not compare latency, and it is not a canary that shifts traffic step by step.
 - Pull requests opened with the default `GITHUB_TOKEN` do not start new workflow runs. This is a GitHub rule. Re-run the checks by hand, or use a GitHub App token.
 
 ## Roadmap
 
 - Fix pull requests for vulnerable dependencies (bump to the fixed version).
-- Metric-based verification after deploy (Prometheus).
-- Rank vulnerabilities with exploit data (EPSS, CISA KEV).
+- Canary releases: send a small share of traffic to the new version first and compare its metrics with the old one.
 - The same Terraform flow against a managed cloud cluster.

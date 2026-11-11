@@ -1,4 +1,4 @@
-fastapi==99.0.0
+fastapi
 uvicorn
 prometheus-client
 httpx

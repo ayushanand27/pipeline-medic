@@ -2,11 +2,29 @@
 
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 
 from .pricing import final_price
 
 app = FastAPI(title="demo-app")
+
+# One counter, split by status code. Prometheus reads it from /metrics,
+# and the pipeline uses it to check the error rate after a deploy.
+REQUESTS = Counter("http_requests_total", "HTTP requests handled", ["path", "status"])
+
+
+@app.middleware("http")
+async def count_requests(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path != "/metrics":
+        REQUESTS.labels(path=request.url.path, status=str(response.status_code)).inc()
+    return response
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health")

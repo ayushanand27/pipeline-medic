@@ -1,6 +1,6 @@
 import json
 
-from medic.triage import from_bandit, from_leakkill, from_trivy, main, merge, summarize
+from medic.triage import EPSS_URL, KEV_URL, enrich, from_bandit, from_leakkill, from_trivy, main, merge, summarize
 
 
 def trivy_report(target: str, *vulns: dict) -> dict:
@@ -79,3 +79,45 @@ def test_command_line_writes_summary_and_report(tmp_path):
     summary = json.loads(out.read_text())
     assert summary["raw_findings"] == 2 and summary["duplicates_removed"] == 1
     assert "CVE-1" in report.read_text()
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def json(self):
+        return self.payload
+
+
+def fake_get(url, **kwargs):
+    if url == KEV_URL:
+        return FakeResponse({"vulnerabilities": [{"cveID": "CVE-MEDIUM-EXPLOITED"}]})
+    assert url == EPSS_URL
+    return FakeResponse({"data": [{"cve": "CVE-HIGH-LIKELY", "epss": "0.91"}, {"cve": "CVE-HIGH-UNLIKELY", "epss": "0.01"}]})
+
+
+def test_exploit_data_changes_the_order():
+    report = trivy_report(
+        "image",
+        vuln("CVE-HIGH-UNLIKELY", "HIGH", "2.0"),
+        vuln("CVE-CRITICAL", "CRITICAL", "2.0"),
+        vuln("CVE-MEDIUM-EXPLOITED", "MEDIUM", "2.0"),
+        vuln("CVE-HIGH-LIKELY", "HIGH", "2.0"),
+    )
+    findings = from_trivy(report)
+    assert enrich(findings, get=fake_get) == []
+    order = [finding.id for finding in merge(findings)]
+    # A medium that is being exploited right now beats a critical that is not.
+    assert order == ["CVE-MEDIUM-EXPLOITED", "CVE-CRITICAL", "CVE-HIGH-LIKELY", "CVE-HIGH-UNLIKELY"]
+    assert summarize(4, merge(findings))["known_exploited_fixable"] == 1
+
+
+def test_exploit_sources_being_down_is_not_fatal():
+    def broken_get(url, **kwargs):
+        raise ConnectionError("offline")
+
+    findings = from_trivy(trivy_report("image", vuln("CVE-1", "HIGH", "2.0")))
+    problems = enrich(findings, get=broken_get)
+    assert len(problems) == 2
+    assert findings[0].known_exploited is False and findings[0].epss is None
+    assert [f.id for f in merge(findings)] == ["CVE-1"]

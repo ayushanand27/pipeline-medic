@@ -24,3 +24,11 @@ def test_quote_rejects_negative_amount():
 def test_health_fails_when_a_broken_release_is_simulated(monkeypatch):
     monkeypatch.setenv("FAIL_HEALTH", "true")
     assert client.get("/health").status_code == 503
+
+
+def test_metrics_count_requests_by_status():
+    client.get("/quote", params={"amount": 100})
+    client.get("/quote", params={"amount": -1})
+    body = client.get("/metrics").text
+    assert 'http_requests_total{path="/quote",status="200"}' in body
+    assert 'http_requests_total{path="/quote",status="400"}' in body

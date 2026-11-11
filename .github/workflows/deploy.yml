@@ -1,5 +1,5 @@
 # The delivery pipeline for the demo app:
-#   build -> security scans -> triage -> policy gate -> cluster (Terraform) -> deploy -> verify -> rollback drill
+#   build -> security scans -> triage -> policy gate -> cluster (Terraform) -> deploy -> verify -> metric check -> rollback drill
 # The cluster is a throw-away "kind" cluster inside the CI runner, so this costs nothing.
 name: deploy
 
@@ -48,7 +48,7 @@ jobs:
       - name: Triage findings
         run: |
           python -m medic.triage --trivy reports/trivy-image.json --trivy reports/trivy-fs.json \
-            --bandit reports/bandit.json --leakkill reports/leakkill.json \
+            --bandit reports/bandit.json --leakkill reports/leakkill.json --enrich \
             --out reports/security.json --report reports/security.md
           cat reports/security.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -84,8 +84,14 @@ jobs:
       - name: Deploy
         run: ./deploy/deploy.sh "$IMAGE"
 
+      - name: Deploy monitoring (Prometheus)
+        run: kubectl apply -f deploy/k8s/prometheus.yaml
+
       - name: Verify (rolls back on failure)
         run: ./deploy/verify.sh
+
+      - name: Metric check with Prometheus (rolls back on a high error rate)
+        run: ./deploy/metrics_check.sh
 
       - name: Rollback drill (ship a broken release, expect an automatic rollback)
         run: ./deploy/rollback_drill.sh

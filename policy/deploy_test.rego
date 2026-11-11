@@ -17,7 +17,7 @@ manifest(replicas, container) := {
 	"spec": {"replicas": replicas, "template": {"spec": {"containers": [container]}}},
 }
 
-clean := {"secrets": 0, "critical_fixable": 0}
+clean := {"secrets": 0, "critical_fixable": 0, "known_exploited_fixable": 0}
 
 test_good_release_is_allowed if {
 	count(deploy.deny) == 0 with input as {"manifests": [manifest(2, good_container)], "security": clean}
@@ -63,5 +63,12 @@ test_fixable_critical_vulnerability_is_denied if {
 	count(deploy.deny) == 1 with input as {
 		"manifests": [manifest(2, good_container)],
 		"security": {"secrets": 0, "critical_fixable": 3},
+	}
+}
+
+test_exploited_vulnerability_is_denied_even_if_not_critical if {
+	count(deploy.deny) == 1 with input as {
+		"manifests": [manifest(2, good_container)],
+		"security": {"secrets": 0, "critical_fixable": 0, "known_exploited_fixable": 1},
 	}
 }

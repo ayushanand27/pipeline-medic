@@ -68,3 +68,8 @@ deny contains msg if {
 	input.security.critical_fixable > 0
 	msg := sprintf("%d critical vulnerability(ies) with a fix available", [input.security.critical_fixable])
 }
+
+deny contains msg if {
+	input.security.known_exploited_fixable > 0
+	msg := sprintf("%d vulnerability(ies) that attackers are exploiting right now, with a fix available", [input.security.known_exploited_fixable])
+}

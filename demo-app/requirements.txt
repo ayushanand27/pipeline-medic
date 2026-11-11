@@ -1,4 +1,5 @@
 fastapi
 uvicorn
+prometheus-client
 httpx
 pytest

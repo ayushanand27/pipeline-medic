@@ -1,0 +1,14 @@
+2026-11-11T17:00:00.1234567Z .....F...                                                                [100%]
+2026-11-11T17:00:00.1234567Z =================================== FAILURES ===================================
+2026-11-11T17:00:00.1234567Z _________________ test_coupon_is_applied_before_delivery_check _________________
+2026-11-11T17:00:00.1234567Z 
+2026-11-11T17:00:00.1234567Z     def test_coupon_is_applied_before_delivery_check():
+2026-11-11T17:00:00.1234567Z         # 600 with 25% off is 450, which is below 500, so delivery is added.
+2026-11-11T17:00:00.1234567Z >       assert final_price(600, "FESTIVE25") == 490
+2026-11-11T17:00:00.1234567Z E       AssertionError: assert 450.0 == 490
+2026-11-11T17:00:00.1234567Z E        +  where 450.0 = final_price(600, 'FESTIVE25')
+2026-11-11T17:00:00.1234567Z 
+2026-11-11T17:00:00.1234567Z demo-app/tests/test_pricing.py:16: AssertionError
+2026-11-11T17:00:00.1234567Z =========================== short test summary info ============================
+2026-11-11T17:00:00.1234567Z FAILED demo-app/tests/test_pricing.py::test_coupon_is_applied_before_delivery_check
+2026-11-11T17:00:00.1234567Z 1 failed, 8 passed in 0.31s

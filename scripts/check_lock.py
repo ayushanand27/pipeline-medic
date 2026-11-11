@@ -2,7 +2,7 @@
 
 Refresh the lock with:
     pip install uv
-    uv pip compile demo-app/requirements.txt --python-version 3.12 --no-header -o demo-app/requirements.lock
+    uv pip compile demo-app/requirements.txt --python-version 3.12 --no-header --generate-hashes -o demo-app/requirements.lock
 """
 
 import re

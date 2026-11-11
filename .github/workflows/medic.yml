@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install --only-binary :all: -r requirements.txt
+          pip install --require-hashes --only-binary :all: -r requirements.txt
       - name: Diagnose and open a fix
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -5,10 +5,11 @@ RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir --only-binary :all: pip==26.3 setuptools==84.2.1
 
 WORKDIR /srv
-# requirements.lock has the exact version of every package (made from requirements.txt).
+# requirements.lock has the exact version and file hash of every package (made from requirements.txt).
+# --require-hashes makes pip refuse any file that does not match.
 # --only-binary stops pip from running a package's own setup script during install.
 COPY requirements.lock .
-RUN pip install --no-cache-dir --only-binary :all: -r requirements.lock
+RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r requirements.lock
 COPY app ./app
 
 # Do not run as root inside the container.

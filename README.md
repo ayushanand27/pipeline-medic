@@ -147,18 +147,18 @@ Example client config (stdio):
 
 ## Dependencies
 
-Every install uses exact versions, so a build today and a build next month get the same packages.
+Every install uses exact versions and file hashes, so a build today and a build next month get the same packages, and a tampered package is refused.
 
 - `requirements.txt`, `requirements-mcp.txt` and `requirements-scan.txt` are generated from the matching `.in` files.
 - The Docker image installs from `demo-app/requirements.lock`, generated from `demo-app/requirements.txt`. A CI job fails if the two drift apart.
-- Installs use `--only-binary :all:`, so pip never runs a package's own setup script.
+- Installs use `--require-hashes`, so pip rejects any file whose hash is not in the lock, and `--only-binary :all:`, so pip never runs a package's own setup script.
 
 Refresh after changing a dependency:
 
 ```bash
 pip install uv
-uv pip compile requirements.in --python-version 3.12 --no-header -o requirements.txt
-uv pip compile demo-app/requirements.txt --python-version 3.12 --no-header -o demo-app/requirements.lock
+uv pip compile requirements.in --python-version 3.12 --no-header --generate-hashes -o requirements.txt
+uv pip compile demo-app/requirements.txt --python-version 3.12 --no-header --generate-hashes -o demo-app/requirements.lock
 ```
 
 `demo-ci` installs from the loose `demo-app/requirements.txt` on purpose. That file is what the planted bugs break and what the agent repairs.

@@ -19,7 +19,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install --only-binary :all: -r requirements.txt -r requirements-mcp.txt
+          pip install --require-hashes --only-binary :all: -r requirements.txt -r requirements-mcp.txt
       - run: python -m pytest tests -q
 
   lockfile:

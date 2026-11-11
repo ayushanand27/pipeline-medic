@@ -26,7 +26,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install --only-binary :all: -r requirements.txt -r requirements-scan.txt
+          pip install --require-hashes --only-binary :all: -r requirements.txt -r requirements-scan.txt
 
       - name: Build image
         run: docker build -t "$IMAGE" demo-app
@@ -57,7 +57,7 @@ jobs:
       # ---- policy gate ---------------------------------------------------------
       - name: Policy gate (OPA)
         run: |
-          python scripts/policy_input.py "$IMAGE" reports/security.json > reports/policy-input.json
+          python scripts/policy_input.py "$IMAGE" > reports/policy-input.json
           docker run --rm -v "$PWD:/work" -w /work openpolicyagent/opa:latest \
             eval --format pretty --fail-defined \
             -d policy/deploy.rego -i reports/policy-input.json 'data.deploy.deny[msg]'

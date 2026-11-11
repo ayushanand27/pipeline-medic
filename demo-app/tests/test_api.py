@@ -19,3 +19,8 @@ def test_quote():
 
 def test_quote_rejects_negative_amount():
     assert client.get("/quote", params={"amount": -5}).status_code == 400
+
+
+def test_health_fails_when_a_broken_release_is_simulated(monkeypatch):
+    monkeypatch.setenv("FAIL_HEALTH", "true")
+    assert client.get("/health").status_code == 503

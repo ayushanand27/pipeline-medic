@@ -1,12 +1,12 @@
-# Builds the demo app image, creates a Kubernetes cluster with Terraform,
-# deploys the app, checks it is healthy, and rolls back if it is not.
+# The delivery pipeline for the demo app:
+#   build -> security scans -> triage -> policy gate -> cluster (Terraform) -> deploy -> verify -> rollback drill
 # The cluster is a throw-away "kind" cluster inside the CI runner, so this costs nothing.
 name: deploy
 
 on:
   push:
     branches: [main]
-    paths: ["demo-app/**", "deploy/**", ".github/workflows/deploy.yml"]
+    paths: ["demo-app/**", "deploy/**", "policy/**", "medic/triage.py", ".github/workflows/deploy.yml"]
   workflow_dispatch:
 
 permissions:
@@ -21,10 +21,52 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt bandit leakkill
 
       - name: Build image
         run: docker build -t "$IMAGE" demo-app
 
+      # ---- security gate -------------------------------------------------------
+      - name: Scan image and dependencies (Trivy)
+        run: |
+          mkdir -p reports
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/reports:/reports" \
+            aquasec/trivy:latest image --quiet --ignore-unfixed --format json \
+            --output /reports/trivy-image.json "$IMAGE"
+          docker run --rm -v "$PWD:/src:ro" -v "$PWD/reports:/reports" \
+            aquasec/trivy:latest fs --quiet --format json \
+            --output /reports/trivy-fs.json /src/demo-app
+
+      - name: Scan our code (Bandit) and look for secrets (LeakKill)
+        run: |
+          bandit -q -r medic demo-app/app -f json -o reports/bandit.json || true
+          leakkill scan . --json > reports/leakkill.json || true
+
+      - name: Triage findings
+        run: |
+          python -m medic.triage --trivy reports/trivy-image.json --trivy reports/trivy-fs.json \
+            --bandit reports/bandit.json --leakkill reports/leakkill.json \
+            --out reports/security.json --report reports/security.md
+          cat reports/security.md >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- policy gate ---------------------------------------------------------
+      - name: Policy gate (OPA)
+        run: |
+          python scripts/policy_input.py "$IMAGE" reports/security.json > reports/policy-input.json
+          docker run --rm -v "$PWD:/work" -w /work openpolicyagent/opa:latest \
+            eval --format pretty --fail-defined \
+            -d policy/deploy.rego -i reports/policy-input.json 'data.deploy.deny[msg]'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports
+          path: reports/
+
+      # ---- deploy --------------------------------------------------------------
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
@@ -45,6 +87,11 @@ jobs:
       - name: Verify (rolls back on failure)
         run: ./deploy/verify.sh
 
+      - name: Rollback drill (ship a broken release, expect an automatic rollback)
+        run: ./deploy/rollback_drill.sh
+
       - name: Show cluster state
         if: always()
-        run: kubectl get deployments,pods,services -n demo -o wide
+        run: |
+          kubectl get deployments,pods,services -n demo -o wide
+          kubectl -n demo rollout history deployment/demo-app

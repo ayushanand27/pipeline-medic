@@ -6,6 +6,7 @@ from pathlib import Path
 from medic import agent, diagnose as diagnose_module
 from medic.agent import handle_run
 from medic.config import Config
+from medic.github_client import PullRequestsNotAllowed
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -13,6 +14,8 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 class FakeGitHub:
     def __init__(self, log_name: str, files: dict[str, str], branch: str = "feature", conclusion: str = "failure"):
+        self.repo = "owner/name"
+        self.allow_pull_requests = True
         self.log = (FIXTURES / log_name).read_text(encoding="utf-8")
         self.files = files
         self.run = {
@@ -50,6 +53,8 @@ class FakeGitHub:
         self.written[path] = text
 
     def open_pull_request(self, title, body, head, base):
+        if not self.allow_pull_requests:
+            raise PullRequestsNotAllowed()
         self.pull_requests.append({"title": title, "body": body, "head": head, "base": base})
         return "https://github.test/pull/1"
 
@@ -150,3 +155,12 @@ def test_dry_run_diagnose_reads_local_files():
         Config(),
     )
     assert result.plan is not None and result.plan.changes[0].new == "fastapi\n"
+
+
+def test_fix_is_not_lost_when_the_repo_blocks_pull_requests():
+    gh = FakeGitHub("missing_module.log", {"demo-app/requirements.txt": "uvicorn\n"})
+    gh.allow_pull_requests = False
+    outcome = handle_run(gh, 49, Config())
+    assert outcome.action == "issue"
+    assert gh.written["demo-app/requirements.txt"] == "uvicorn\nfastapi\n"
+    assert "compare/feature...medic/fix-run-49" in gh.issues[0]["body"]

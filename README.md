@@ -64,7 +64,7 @@ git checkout demo-app/requirements.txt
 
 **See it on GitHub:**
 
-1. In the repo go to Settings → Actions → General → Workflow permissions and tick **Allow GitHub Actions to create and approve pull requests**.
+1. In the repo go to Settings → Actions → General → Workflow permissions and tick **Allow GitHub Actions to create and approve pull requests**. (Without it the fix branch is still pushed, and the agent opens an issue that links to it.)
 2. Plant a bug on a new branch and push it:
 
    ```bash
@@ -108,7 +108,7 @@ medic/                 the agent
   guard.py             safety checks on every plan
   github_client.py     GitHub REST API calls
   agent.py             the loop: read -> diagnose -> check -> PR or issue
-tests/                 36 tests, with real captured failure logs as fixtures
+tests/                 37 tests, with real captured failure logs as fixtures
 demo-app/              small FastAPI service the pipeline builds, tests and deploys
 deploy/                Terraform (cluster), Kubernetes manifests, deploy + verify scripts
 scripts/plant_bug.py   breaks the demo app on purpose, three ways
@@ -117,7 +117,7 @@ scripts/plant_bug.py   breaks the demo app on purpose, three ways
 
 ## Tests
 
-- **36 agent tests.** Log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, and the whole loop against a fake GitHub (pull request, issue, loop protection, no double handling).
+- **37 agent tests.** Log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, and the whole loop against a fake GitHub (pull request, issue, loop protection, no double handling).
 - **9 demo app tests.** Price rules and the HTTP API.
 
 ## Known limits

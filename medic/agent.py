@@ -7,6 +7,7 @@ from typing import Callable
 from . import guard
 from .config import Config
 from .diagnose import llm_based, rule_based
+from .github_client import PullRequestsNotAllowed
 from .log_parser import BAD_PIN, MISSING_MODULE, TEST_FAILURE, Failure, extract_failure
 from .models import Plan
 
@@ -147,5 +148,17 @@ def handle_run(gh, run_id: int, cfg: Config) -> Outcome:
     for change in diagnosis.plan.changes:
         gh.update_file(change.path, change.new, fix_branch, f"fix: {change.path} (CI run {run_id})")
     title = f"Fix CI: {diagnosis.failure.kind.replace('_', ' ')} {diagnosis.failure.detail}".strip()
-    url = gh.open_pull_request(title[:120], _pr_body(run, diagnosis), fix_branch, branch)
+    body = _pr_body(run, diagnosis)
+    try:
+        url = gh.open_pull_request(title[:120], body, fix_branch, branch)
+    except PullRequestsNotAllowed:
+        # The fix is already pushed. Do not lose it: point to the branch from an issue.
+        compare = f"https://github.com/{gh.repo}/compare/{branch}...{fix_branch}?expand=1"
+        note = (
+            f"The fix is on branch `{fix_branch}`. [Open the pull request here]({compare}).\n\n"
+            "I could not open it myself. To allow that: Settings → Actions → General → "
+            "tick **Allow GitHub Actions to create and approve pull requests**.\n\n"
+        )
+        url = gh.open_issue(title[:120], note + body)
+        return Outcome("issue", "fix pushed, but this repo does not let Actions open pull requests", url)
     return Outcome("pull_request", diagnosis.plan.root_cause, url)

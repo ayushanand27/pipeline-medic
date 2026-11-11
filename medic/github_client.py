@@ -7,6 +7,10 @@ import requests
 API = "https://api.github.com"
 
 
+class PullRequestsNotAllowed(Exception):
+    """The token may push branches but may not open pull requests (a repo setting)."""
+
+
 class GitHub:
     def __init__(self, token: str, repo: str):
         self.repo = repo  # "owner/name"
@@ -71,8 +75,12 @@ class GitHub:
         )
 
     def open_pull_request(self, title: str, body: str, head: str, base: str) -> str:
-        pr = self._request("POST", "/pulls", json={"title": title, "body": body, "head": head, "base": base})
-        return pr.json()["html_url"]
+        payload = {"title": title, "body": body, "head": head, "base": base}
+        response = self.session.post(self._url("/pulls"), json=payload, timeout=30)
+        if response.status_code == 403:
+            raise PullRequestsNotAllowed()
+        response.raise_for_status()
+        return response.json()["html_url"]
 
     def open_issue(self, title: str, body: str) -> str:
         return self._request("POST", "/issues", json={"title": title, "body": body}).json()["html_url"]

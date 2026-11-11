@@ -1,0 +1,50 @@
+# Builds the demo app image, creates a Kubernetes cluster with Terraform,
+# deploys the app, checks it is healthy, and rolls back if it is not.
+# The cluster is a throw-away "kind" cluster inside the CI runner, so this costs nothing.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["demo-app/**", "deploy/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CLUSTER: pipeline-medic
+  IMAGE: demo-app:${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t "$IMAGE" demo-app
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Create cluster with Terraform
+        working-directory: deploy/terraform
+        run: |
+          terraform init -input=false
+          terraform apply -auto-approve -input=false -var "cluster_name=$CLUSTER"
+          echo "KUBECONFIG=$(terraform output -raw kubeconfig_path)" >> "$GITHUB_ENV"
+
+      - name: Load image into the cluster
+        run: kind load docker-image "$IMAGE" --name "$CLUSTER"
+
+      - name: Deploy
+        run: ./deploy/deploy.sh "$IMAGE"
+
+      - name: Verify (rolls back on failure)
+        run: ./deploy/verify.sh
+
+      - name: Show cluster state
+        if: always()
+        run: kubectl get deployments,pods,services -n demo -o wide

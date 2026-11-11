@@ -1,0 +1,34 @@
+# Runs the agent whenever demo-ci fails.
+name: medic
+
+on:
+  workflow_run:
+    workflows: ["demo-ci"]
+    types: [completed]
+
+permissions:
+  actions: read        # read the failed run and its logs
+  contents: write      # push the fix branch
+  pull-requests: write # open the fix PR
+  issues: write        # open an issue when there is no safe fix
+
+jobs:
+  fix:
+    # Only for failed runs, and never for the agent's own fix branches (no endless loop).
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      !startsWith(github.event.workflow_run.head_branch, 'medic/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Diagnose and open a fix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: python -m medic --repo "${{ github.repository }}" --run-id "${{ github.event.workflow_run.id }}"

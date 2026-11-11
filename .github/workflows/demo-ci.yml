@@ -1,0 +1,25 @@
+# The pipeline that pipeline-medic watches. It builds and tests the demo app.
+name: demo-ci
+
+on:
+  push:
+    paths: ["demo-app/**", ".github/workflows/demo-ci.yml"]
+  pull_request:
+    paths: ["demo-app/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r demo-app/requirements.txt
+      - name: Run tests
+        run: python -m pytest demo-app -q --rootdir .

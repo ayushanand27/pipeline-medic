@@ -120,6 +120,13 @@ def _issue_body(run: dict, diagnosis: Diagnosis) -> str:
     )
 
 
+def diagnose_run(gh, run: dict, run_id: int, cfg: Config) -> Diagnosis:
+    """Read-only: download the logs of a failed run and work out the fix. Writes nothing."""
+    log_text = "\n".join(gh.job_log(job["id"]) for job in gh.failed_jobs(run_id))
+    sha = run["head_sha"]
+    return diagnose(log_text, lambda path: gh.get_file(path, sha), cfg)
+
+
 def handle_run(gh, run_id: int, cfg: Config) -> Outcome:
     run = gh.get_run(run_id)
     if run.get("conclusion") != "failure":
@@ -133,9 +140,7 @@ def handle_run(gh, run_id: int, cfg: Config) -> Outcome:
     if gh.branch_exists(fix_branch):
         return Outcome("skipped", f"`{fix_branch}` already exists")
 
-    log_text = "\n".join(gh.job_log(job["id"]) for job in gh.failed_jobs(run_id))
-    sha = run["head_sha"]
-    diagnosis = diagnose(log_text, lambda path: gh.get_file(path, sha), cfg)
+    diagnosis = diagnose_run(gh, run, run_id, cfg)
 
     if diagnosis.plan is None:
         title = f"CI failed on {branch}: {diagnosis.failure.kind} (run {run_id})"
@@ -144,7 +149,7 @@ def handle_run(gh, run_id: int, cfg: Config) -> Outcome:
         url = gh.open_issue(title, _issue_body(run, diagnosis))
         return Outcome("issue", diagnosis.note, url)
 
-    gh.create_branch(fix_branch, sha)
+    gh.create_branch(fix_branch, run["head_sha"])
     for change in diagnosis.plan.changes:
         gh.update_file(change.path, change.new, fix_branch, f"fix: {change.path} (CI run {run_id})")
     title = f"Fix CI: {diagnosis.failure.kind.replace('_', ' ')} {diagnosis.failure.detail}".strip()

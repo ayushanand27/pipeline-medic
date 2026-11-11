@@ -35,6 +35,10 @@ class GitHub:
     def get_run(self, run_id: int) -> dict:
         return self._request("GET", f"/actions/runs/{run_id}").json()
 
+    def list_failed_runs(self, limit: int = 5) -> list[dict]:
+        params = {"status": "failure", "per_page": limit}
+        return self._request("GET", "/actions/runs", params=params).json()["workflow_runs"]
+
     def failed_jobs(self, run_id: int) -> list[dict]:
         jobs = self._request("GET", f"/actions/runs/{run_id}/jobs", params={"per_page": 100}).json()["jobs"]
         return [job for job in jobs if job.get("conclusion") == "failure"]

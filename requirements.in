@@ -1,3 +1,5 @@
 requests
 pyyaml
 pytest
+pytest-cov
+ruff

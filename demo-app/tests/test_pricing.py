@@ -1,5 +1,4 @@
 import pytest
-
 from app.pricing import discount_percent, final_price
 
 

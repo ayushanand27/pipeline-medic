@@ -1,0 +1,37 @@
+[project]
+name = "pipeline-medic"
+version = "0.2.0"
+description = "Reads a failed CI run, finds the root cause, verifies a fix and opens a pull request."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Ayush Anand" }]
+dependencies = ["requests"]
+
+[project.scripts]
+medic = "medic.__main__:main"
+
+[tool.setuptools]
+packages = ["medic"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = [
+  "S101", # assert is fine in tests
+  "S603", # subprocess calls here use fixed argument lists
+  "S607", # git is found on PATH on purpose
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "E501"]
+"medic/verify.py" = ["S602"] # the verify command is a shell command by design, set by the repo owner
+
+[tool.coverage.run]
+source = ["medic"]
+omit = ["medic/mcp_server.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

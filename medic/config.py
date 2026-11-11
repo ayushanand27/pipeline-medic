@@ -18,6 +18,10 @@ class Config:
     requirements_paths: list[str] = field(default_factory=lambda: ["demo-app/requirements.txt"])
     max_files_changed: int = 3
     max_changed_lines: int = 20
+    # Command that must pass with the fix applied before a pull request is opened.
+    # Empty means "do not verify" (the pull request then says so).
+    verify_command: str = ""
+    verify_timeout_seconds: int = 600
     # Optional LLM (any OpenAI-compatible API). Without a key only the rule-based fixes run.
     llm_base_url: str = ""
     llm_api_key: str = ""
@@ -34,6 +38,7 @@ class Config:
             cfg.allowed_paths = _split(os.environ["MEDIC_ALLOWED_PATHS"])
         if os.getenv("MEDIC_REQUIREMENTS_PATHS"):
             cfg.requirements_paths = _split(os.environ["MEDIC_REQUIREMENTS_PATHS"])
+        cfg.verify_command = os.getenv("MEDIC_VERIFY_COMMAND", "").strip()
         cfg.llm_base_url = os.getenv("LLM_BASE_URL", "").rstrip("/")
         cfg.llm_api_key = os.getenv("LLM_API_KEY", "")
         cfg.llm_model = os.getenv("LLM_MODEL", "")

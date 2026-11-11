@@ -1,0 +1,53 @@
+name: pipeline-medic
+description: Reads a failed GitHub Actions run, finds the root cause, verifies a fix and opens a pull request.
+author: ayushanand27
+
+inputs:
+  run-id:
+    description: Id of the failed workflow run to look at.
+    required: true
+  github-token:
+    description: Token with actions read/write, contents write, pull-requests write and issues write.
+    required: true
+  verify-command:
+    description: Command that must pass with the fix applied before a pull request is opened. Empty skips verification.
+    default: ""
+  allowed-paths:
+    description: Comma-separated folders the agent may edit, for example "src/,tests/".
+    default: ""
+  requirements-paths:
+    description: Comma-separated dependency files the rule-based fixes may edit.
+    default: ""
+  llm-base-url:
+    description: Optional. Base URL of an OpenAI-compatible API.
+    default: ""
+  llm-model:
+    description: Optional. Model name for the LLM step.
+    default: ""
+  llm-api-key:
+    description: Optional. API key for the LLM step.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install pipeline-medic
+      shell: bash
+      run: |
+        pip install --require-hashes --only-binary :all: -r "$GITHUB_ACTION_PATH/requirements.txt"
+    - name: Diagnose, verify and open a fix
+      shell: bash
+      env:
+        RUN_ID: ${{ inputs.run-id }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        MEDIC_VERIFY_COMMAND: ${{ inputs.verify-command }}
+        MEDIC_ALLOWED_PATHS: ${{ inputs.allowed-paths }}
+        MEDIC_REQUIREMENTS_PATHS: ${{ inputs.requirements-paths }}
+        LLM_BASE_URL: ${{ inputs.llm-base-url }}
+        LLM_MODEL: ${{ inputs.llm-model }}
+        LLM_API_KEY: ${{ inputs.llm-api-key }}
+      run: |
+        PYTHONPATH="$GITHUB_ACTION_PATH" python -m medic --repo "$GITHUB_REPOSITORY" --run-id "$RUN_ID"

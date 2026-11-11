@@ -1,6 +1,10 @@
 # pipeline-medic
 
-When a CI build fails, pipeline-medic reads the logs, finds the root cause and opens a pull request with the fix. If it cannot fix it safely, it opens an issue that explains what broke.
+[![ci](https://github.com/ayushanand27/pipeline-medic/actions/workflows/ci.yml/badge.svg)](https://github.com/ayushanand27/pipeline-medic/actions/workflows/ci.yml)
+[![deploy](https://github.com/ayushanand27/pipeline-medic/actions/workflows/deploy.yml/badge.svg)](https://github.com/ayushanand27/pipeline-medic/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+When a CI build fails, pipeline-medic reads the logs, finds the root cause, proves the fix works, and opens a pull request. If the failure is only a network problem it restarts the job. If it cannot fix it safely, it opens an issue that explains what broke.
 
 It also ships a full delivery pipeline for a small demo app: test, build a Docker image, scan it, pass a policy gate, create a Kubernetes cluster with Terraform, deploy, verify, and roll back if the new version is unhealthy.
 
@@ -11,12 +15,15 @@ flowchart LR
     A[Push] --> B[demo-ci: install + test]
     B -- fails --> C[medic: read logs]
     C --> D{Known error?}
+    C -- network problem --> R[Restart the job once]
     D -- yes --> E[Rule-based fix]
     D -- no --> F[LLM fix - optional]
     E --> G[Guardrails]
     F --> G
-    G -- pass --> H[Fix branch + pull request]
-    G -- reject --> I[Issue with diagnosis]
+    G -- pass --> V{Fix verified?}
+    V -- check passes --> H[Fix branch + pull request]
+    V -- check fails --> I[Issue with diagnosis]
+    G -- reject --> I
     B -- passes on main --> S[Security scans + triage]
     S --> P{Policy gate - OPA}
     P -- deny --> X[Stop]
@@ -28,13 +35,15 @@ flowchart LR
 ## How it works
 
 1. **Trigger.** `medic.yml` runs when the `demo-ci` workflow finishes with a failure.
-2. **Read.** The agent downloads the logs of the failed jobs through the GitHub REST API.
+2. **Read.** The agent downloads the logs of the failed jobs through the GitHub REST API, and the list of files the failing commit changed.
 3. **Parse.** `log_parser.py` uses plain regex to pull out what failed. This step is not an LLM, so it is cheap and gives the same answer every time.
-4. **Diagnose.** `diagnose.py` has two layers:
-   - **Rules** for errors with one known fix: a package missing from `requirements.txt`, or a package pinned to a version that does not exist.
-   - **LLM** (optional) for everything else, like a failing test. It gets the error and the files involved and must answer with exact search-and-replace edits.
+4. **Decide.** There are three possible responses:
+   - **Retry.** A timeout, a DNS error or a rate limit is not a code problem. The agent restarts the failed jobs once. If they fail again, it opens an issue.
+   - **Fix.** `diagnose.py` has two layers. Rules handle errors with one known fix (a package missing from `requirements.txt`, or a package pinned to a version that does not exist). An optional LLM handles everything else, like a failing test. It gets the error and the files involved and must answer with exact search-and-replace edits.
+   - **Escalate.** If there is no safe fix, the agent opens an issue with the diagnosis and changes nothing.
 5. **Guardrails.** `guard.py` checks every plan in code before anything is written (see below).
-6. **Act.** The agent creates a branch `medic/fix-run-<id>`, commits the change and opens a pull request with the root cause, the diff and the log. A person reviews and merges it.
+6. **Verify.** `verify.py` applies the fix to a clean copy of the failing commit, in a fresh virtual environment, and runs the project's own check command. Only a fix that makes the check pass becomes a pull request. A fix that fails goes into an issue instead.
+7. **Act.** The agent creates a branch `medic/fix-run-<id>`, commits the change and opens a labelled pull request with the root cause, the diff, the verification output and the log. A person reviews and merges it.
 
 ## Guardrails
 
@@ -45,6 +54,9 @@ The LLM is never trusted on its own. Code decides what is allowed.
 | Only files under `demo-app/` can be edited | The agent cannot change the pipeline, the deploy files or its own code |
 | At most 3 files and 20 changed lines per fix | A CI fix should be small. A big change needs a person |
 | Every LLM edit must match the file exactly, once | If the model did not copy the text exactly, the fix is dropped, not guessed |
+| The fix must pass the project's check before a pull request | A fix that does not work is noise for the reviewer |
+| The check runs without tokens or API keys | It executes code from the branch being repaired, so it gets no secrets |
+| The agent code always comes from the default branch | A broken branch cannot change the agent that repairs it |
 | The agent only opens pull requests | It never pushes to `main` and never merges |
 | Runs on `medic/` branches are ignored | The agent cannot get stuck fixing its own fixes in a loop |
 | One fix branch per failed run | The same failure is not handled twice |
@@ -57,6 +69,10 @@ You need Python 3.12+.
 pip install -r requirements.txt -r demo-app/requirements.txt
 python -m pytest tests -q                    # agent tests
 python -m pytest demo-app -q --rootdir .     # demo app tests
+```
+
+```bash
+python -m evals.run                          # evaluation set, see below
 ```
 
 **Dry run on a saved log (no GitHub needed):**
@@ -83,6 +99,46 @@ git checkout demo-app/requirements.txt
 `missing-dep` and `bad-pin` are fixed by rules and need no API key. `logic-bug` needs the LLM step. Without it, the agent opens an issue with the diagnosis.
 
 **Turn on the LLM step (optional).** Any OpenAI-compatible API works. In Settings → Secrets and variables → Actions add the secret `LLM_API_KEY` and the variables `LLM_BASE_URL` and `LLM_MODEL`.
+
+## Use it in another repository
+
+The agent is packaged as a GitHub Action. Add this workflow to a repo and point it at your CI workflow:
+
+```yaml
+name: medic
+on:
+  workflow_run:
+    workflows: ["CI"]          # the workflow to watch
+    types: [completed]
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  issues: write
+jobs:
+  fix:
+    if: github.event.workflow_run.conclusion == 'failure' && !startsWith(github.event.workflow_run.head_branch, 'medic/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: ayushanand27/pipeline-medic@main
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          verify-command: pip install -r requirements.txt && pytest
+          allowed-paths: src/,tests/
+          requirements-paths: requirements.txt
+```
+
+## Evaluation set
+
+Unit tests check single functions. `evals/` checks the behaviour a user cares about: for a given failed build, does the agent pick the right response (fix, retry or escalate)?
+
+There are 12 cases: 3 use real captured logs, 9 use short hand-written logs for one situation each (for example a real error next to a harmless retry warning, or an out-of-memory kill the agent does not know). CI fails if any case is wrong.
+
+Current score: 12/12. These cases were written together with the rules, so this is a regression gate, not an independent benchmark. The LLM layer is not part of the score yet.
 
 ## Delivery pipeline
 
@@ -171,12 +227,15 @@ medic/                 the agent
   diagnose.py          rules first, optional LLM second
   guard.py             safety checks on every plan
   github_client.py     GitHub REST API calls
-  agent.py             the loop: read -> diagnose -> check -> PR or issue
+  verify.py            apply the fix to a clean copy and run the project's check
+  agent.py             the loop: read -> decide -> check -> verify -> PR, retry or issue
   tools.py             the agent's abilities as plain functions
   mcp_server.py        the same abilities as MCP tools
   triage.py            merge, de-duplicate and rank scanner reports
+evals/                 12 failed-build cases and the expected response for each
 policy/                OPA rules for a release, with their own tests
-tests/                 62 tests, with real captured failure logs as fixtures
+action.yml             the agent as a reusable GitHub Action
+tests/                 97 tests (96% coverage), with real captured failure logs as fixtures
 demo-app/              small FastAPI service the pipeline builds, tests and deploys
 deploy/                Terraform (cluster), Kubernetes manifests (app + Prometheus), deploy, verify, metric check and rollback drill scripts
 scripts/plant_bug.py   breaks the demo app on purpose, three ways
@@ -185,7 +244,9 @@ scripts/plant_bug.py   breaks the demo app on purpose, three ways
 
 ## Tests
 
-- **62 agent tests.** Log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, the whole loop against a fake GitHub, the triage and exploit ranking, the metric check, the file-path checks, and the MCP server through a real MCP client.
+- **97 agent tests, 96% line coverage.** CI fails under 90%. They cover log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, the whole loop against a fake GitHub, fix verification against a real temporary git repository, retries, the triage and exploit ranking, the metric check, and the MCP server through a real MCP client.
+- **12 evaluation cases.** See above.
+- **Lint.** `ruff` with its security rules runs on every push.
 - **10 policy tests.** One for a good release and one for each rule.
 - **11 demo app tests.** Price rules, the HTTP API and the metrics.
 - **In the pipeline itself.** The rollback drill runs on every deploy.
@@ -195,6 +256,7 @@ scripts/plant_bug.py   breaks the demo app on purpose, three ways
 - The rules cover two Python dependency errors. Other failures need the LLM step or end as an issue.
 - The LLM step is tested with recorded answers, not yet against a live model.
 - Only Python projects and pytest output are understood today.
+- Verification runs on the CI runner, not in a locked-down sandbox. It gets no secrets, but it does have network access.
 - The cluster is a local kind cluster, not a cloud cluster (EKS, GKE, AKS).
 - The security gate reports findings. It does not open fix pull requests for them yet.
 - The metric check looks at the error rate only. It does not compare latency, and it is not a canary that shifts traffic step by step.

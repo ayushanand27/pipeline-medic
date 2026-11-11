@@ -36,7 +36,10 @@ def verdict(total: float, errors: float) -> tuple[bool, str]:
     if total < MIN_REQUESTS:
         return False, f"only {total:.0f} requests seen, need {MIN_REQUESTS} to judge"
     ratio = error_ratio(total, errors)
-    message = f"{errors:.0f} server errors in {total:.0f} requests ({ratio * 100:.2f}%), limit {MAX_ERROR_RATIO * 100:.2f}%"
+    message = (
+        f"{errors:.0f} server errors in {total:.0f} requests ({ratio * 100:.2f}%), "
+        f"limit {MAX_ERROR_RATIO * 100:.2f}%"
+    )
     return ratio <= MAX_ERROR_RATIO, message
 
 

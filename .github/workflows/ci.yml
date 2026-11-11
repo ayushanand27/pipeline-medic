@@ -20,7 +20,12 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --require-hashes --only-binary :all: -r requirements.txt -r requirements-mcp.txt
-      - run: python -m pytest tests -q
+      - name: Lint (ruff, includes security rules)
+        run: ruff check .
+      - name: Tests with coverage (fails under 90%)
+        run: python -m pytest tests -q --cov --cov-report=term --cov-fail-under=90
+      - name: Evaluation set (the agent must pick the right response in every case)
+        run: python -m evals.run
 
   lockfile:
     # The Docker image installs from demo-app/requirements.lock.

@@ -3,10 +3,10 @@
 import asyncio
 
 import pytest
+from test_agent import FakeGitHub
 
 from medic import tools
 from medic.config import Config
-from test_agent import FakeGitHub
 
 
 class FakeGitHubWithRuns(FakeGitHub):

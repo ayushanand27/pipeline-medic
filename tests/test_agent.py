@@ -3,10 +3,12 @@
 import json
 from pathlib import Path
 
-from medic import agent, diagnose as diagnose_module
+from medic import agent
+from medic import diagnose as diagnose_module
 from medic.agent import handle_run
 from medic.config import Config
 from medic.github_client import PullRequestsNotAllowed
+from medic.verify import VerifyResult
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -26,6 +28,9 @@ class FakeGitHub:
             "run_number": 7,
             "html_url": "https://github.test/run/7",
         }
+        self.changed_files = ["demo-app/requirements.txt"]
+        self.labels: list[tuple[str, str]] = []
+        self.reruns: list[int] = []
         self.branches: dict[str, str] = {}
         self.written: dict[str, str] = {}
         self.pull_requests: list[dict] = []
@@ -39,6 +44,15 @@ class FakeGitHub:
 
     def job_log(self, job_id):
         return self.log
+
+    def commit_files(self, sha):
+        return self.changed_files
+
+    def rerun_failed_jobs(self, run_id):
+        self.reruns.append(run_id)
+
+    def add_label(self, url, label):
+        self.labels.append((url, label))
 
     def get_file(self, path, ref):
         return self.files.get(path)
@@ -164,3 +178,71 @@ def test_fix_is_not_lost_when_the_repo_blocks_pull_requests():
     assert outcome.action == "issue"
     assert gh.written["demo-app/requirements.txt"] == "uvicorn\nfastapi\n"
     assert "compare/feature...medic/fix-run-49" in gh.issues[0]["body"]
+
+
+# ---- verification before the pull request ---------------------------------------
+
+def verifier_that(passes: bool):
+    calls = []
+
+    def verifier(plan, sha, command, timeout=600):
+        calls.append((sha, command))
+        return VerifyResult(passes, command, "9 passed" if passes else "1 failed")
+
+    verifier.calls = calls
+    return verifier
+
+
+def test_verified_fix_gets_a_pull_request_that_says_so():
+    gh = FakeGitHub("missing_module.log", {"demo-app/requirements.txt": "uvicorn\n"})
+    verifier = verifier_that(True)
+    outcome = handle_run(gh, 50, Config(verify_command="pytest"), verifier=verifier)
+    assert outcome.action == "pull_request" and outcome.verified == "passed"
+    assert verifier.calls == [("abc123", "pytest")]
+    body = gh.pull_requests[0]["body"]
+    assert "`pytest` passed" in body and "9 passed" in body
+    assert gh.labels == [("https://github.test/pull/1", "pipeline-medic")]
+
+
+def test_fix_that_fails_verification_never_becomes_a_pull_request():
+    gh = FakeGitHub("missing_module.log", {"demo-app/requirements.txt": "uvicorn\n"})
+    outcome = handle_run(gh, 51, Config(verify_command="pytest"), verifier=verifier_that(False))
+    assert outcome.action == "issue" and outcome.verified == "failed"
+    assert not gh.branches and not gh.written and not gh.pull_requests
+    assert "Proposed fix (rejected)" in gh.issues[0]["body"] and "FAILED" in gh.issues[0]["body"]
+
+
+def test_without_a_verify_command_the_pull_request_says_not_verified():
+    gh = FakeGitHub("missing_module.log", {"demo-app/requirements.txt": "uvicorn\n"})
+    outcome = handle_run(gh, 52, Config())
+    assert outcome.verified == "not run"
+    assert "Not run" in gh.pull_requests[0]["body"]
+
+
+def test_pull_request_lists_the_files_changed_in_the_failing_commit():
+    gh = FakeGitHub("missing_module.log", {"demo-app/requirements.txt": "uvicorn\n"})
+    handle_run(gh, 53, Config())
+    assert "Files changed in the failing commit" in gh.pull_requests[0]["body"]
+
+
+# ---- network problems are retried, not "fixed" ------------------------------------
+
+def transient_github(tmp_path, attempt: int) -> FakeGitHub:
+    gh = FakeGitHub("missing_module.log", {"demo-app/requirements.txt": "uvicorn\n"})
+    gh.log = "Collecting fastapi\nERROR: HTTPSConnectionPool(host='pypi.org'): Read timed out.\n##[error]exit code 1\n"
+    gh.run["run_attempt"] = attempt
+    return gh
+
+
+def test_network_failure_is_retried_once(tmp_path):
+    gh = transient_github(tmp_path, attempt=1)
+    outcome = handle_run(gh, 54, Config())
+    assert outcome.action == "rerun" and gh.reruns == [54]
+    assert not gh.pull_requests and not gh.issues and not gh.written
+
+
+def test_network_failure_after_a_retry_goes_to_a_person(tmp_path):
+    gh = transient_github(tmp_path, attempt=2)
+    outcome = handle_run(gh, 55, Config())
+    assert outcome.action == "issue" and gh.reruns == []
+    assert "already failed again" in gh.issues[0]["body"]

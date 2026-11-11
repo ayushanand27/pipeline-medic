@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from medic.log_parser import BAD_PIN, MISSING_MODULE, TEST_FAILURE, UNKNOWN, extract_failure
+import pytest
+
+from medic.log_parser import BAD_PIN, MISSING_MODULE, TEST_FAILURE, TRANSIENT, UNKNOWN, extract_failure
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -47,3 +49,22 @@ def test_unknown_error_does_not_crash():
 
 def test_empty_log_does_not_crash():
     assert extract_failure("").kind == UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "curl: (6) Could not resolve host: github.com",
+        "urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='pypi.org', port=443): Read timed out.",
+        "error: RPC failed; HTTP 503 Service Unavailable",
+        "toomanyrequests: 429 Too Many Requests",
+        "##[error]The runner has received a shutdown signal.",
+    ],
+)
+def test_network_and_service_problems_are_transient(line):
+    assert extract_failure(f"step 1\n{line}\n##[error]exit code 1").kind == TRANSIENT
+
+
+def test_a_real_error_wins_over_a_network_warning():
+    log = "WARNING: Retrying after connection broken: Read timed out\nModuleNotFoundError: No module named 'fastapi'\n"
+    assert extract_failure(log).kind == MISSING_MODULE

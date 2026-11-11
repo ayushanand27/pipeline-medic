@@ -46,6 +46,14 @@ class GitHub:
     def job_log(self, job_id: int) -> str:
         return self._request("GET", f"/actions/jobs/{job_id}/logs").text
 
+    def commit_files(self, sha: str) -> list[str]:
+        """Names of the files changed by one commit."""
+        files = self._request("GET", f"/commits/{sha}").json().get("files") or []
+        return [item["filename"] for item in files]
+
+    def rerun_failed_jobs(self, run_id: int) -> None:
+        self._request("POST", f"/actions/runs/{run_id}/rerun-failed-jobs")
+
     def get_file(self, path: str, ref: str) -> str | None:
         """Return the file text at a commit, or None if the file does not exist."""
         response = self.session.get(self._url(f"/contents/{path}"), params={"ref": ref}, timeout=30)
@@ -88,6 +96,14 @@ class GitHub:
 
     def open_issue(self, title: str, body: str) -> str:
         return self._request("POST", "/issues", json={"title": title, "body": body}).json()["html_url"]
+
+    def add_label(self, url: str, label: str) -> None:
+        """Label a pull request or issue, given its web URL. Never fails the run."""
+        try:
+            number = int(url.rstrip("/").split("/")[-1])
+            self._request("POST", f"/issues/{number}/labels", json={"labels": [label]})
+        except (ValueError, requests.RequestException):
+            pass
 
     def issue_exists(self, title: str) -> bool:
         issues = self._request("GET", "/issues", params={"state": "open", "per_page": 100}).json()

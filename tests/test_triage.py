@@ -2,7 +2,18 @@ import json
 
 import pytest
 
-from medic.triage import EPSS_URL, KEV_URL, enrich, safe_path, from_bandit, from_leakkill, from_trivy, main, merge, summarize
+from medic.triage import (
+    EPSS_URL,
+    KEV_URL,
+    enrich,
+    from_bandit,
+    from_leakkill,
+    from_trivy,
+    main,
+    merge,
+    safe_path,
+    summarize,
+)
 
 
 def trivy_report(target: str, *vulns: dict) -> dict:

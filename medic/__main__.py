@@ -18,6 +18,25 @@ from .config import Config
 from .github_client import GitHub
 
 
+def _write_summary(run_id: int, outcome) -> None:
+    """Show the result on the workflow run page (GitHub reads this file)."""
+    summary_file = os.getenv("GITHUB_STEP_SUMMARY")
+    if not summary_file:
+        return
+    lines = [
+        "## pipeline-medic",
+        "",
+        "| Run | What failed | Action | Fix verified | Link |",
+        "| --- | --- | --- | --- | --- |",
+        f"| {run_id} | {outcome.kind or '-'} | {outcome.action} | {outcome.verified or '-'} | {outcome.url or '-'} |",
+        "",
+        outcome.message,
+        "",
+    ]
+    with open(summary_file, "a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="medic", description=__doc__.splitlines()[0])
     parser.add_argument("--repo", help="owner/name")
@@ -48,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("give --repo and --run-id and set GITHUB_TOKEN, or use --log-file for a dry run")
     outcome = handle_run(GitHub(token, args.repo), args.run_id, cfg)
     print(f"medic: {outcome.action}: {outcome.message} {outcome.url}".strip())
+    _write_summary(args.run_id, outcome)
     return 0
 
 

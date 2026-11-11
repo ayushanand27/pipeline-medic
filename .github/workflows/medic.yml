@@ -7,7 +7,7 @@ on:
     types: [completed]
 
 permissions:
-  actions: read        # read the failed run and its logs
+  actions: write       # read the failed run and its logs, restart jobs after a network failure
   contents: write      # push the fix branch
   pull-requests: write # open the fix PR
   issues: write        # open an issue when there is no safe fix
@@ -20,17 +20,19 @@ jobs:
       !startsWith(github.event.workflow_run.head_branch, 'medic/')
     runs-on: ubuntu-latest
     steps:
+      # The failing commit: this is the code the fix is verified against.
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install dependencies
-        run: |
-          pip install --require-hashes --only-binary :all: -r requirements.txt
-      - name: Diagnose and open a fix
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
-          LLM_MODEL: ${{ vars.LLM_MODEL }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-        run: python -m medic --repo "${{ github.repository }}" --run-id "${{ github.event.workflow_run.id }}"
+          ref: ${{ github.event.workflow_run.head_sha }}
+      # The agent itself, always from the default branch, never from the branch being repaired.
+      - uses: actions/checkout@v4
+        with:
+          path: .medic
+      - uses: ./.medic
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          verify-command: pip install -q -r demo-app/requirements.txt && python -m pytest demo-app -q --rootdir .
+          llm-base-url: ${{ vars.LLM_BASE_URL }}
+          llm-model: ${{ vars.LLM_MODEL }}
+          llm-api-key: ${{ secrets.LLM_API_KEY }}

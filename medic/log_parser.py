@@ -15,9 +15,19 @@ _BAD_PIN = re.compile(r"No matching distribution found for (\S+)")
 _FAILED_TEST = re.compile(r"^FAILED (\S+)", re.MULTILINE)
 _PY_PATH = re.compile(r"([\w\-./]+\.py)(?::\d+|\", line \d+)")
 
+# Failures that are not caused by the code: the network or a service had a bad moment.
+# The right response is to run the job again, not to change files.
+_TRANSIENT = re.compile(
+    r"Connection reset by peer|Read timed out|ReadTimeoutError|Temporary failure in name resolution"
+    r"|Could not resolve host|429 Too Many Requests|503 Service Unavailable|502 Bad Gateway"
+    r"|TLS handshake timeout|The runner has received a shutdown signal",
+    re.IGNORECASE,
+)
+
 MISSING_MODULE = "missing_module"
 BAD_PIN = "bad_pin"
 TEST_FAILURE = "test_failure"
+TRANSIENT = "transient"
 UNKNOWN = "unknown"
 
 
@@ -56,7 +66,10 @@ def _files_in(text: str) -> list[str]:
 
 
 def extract_failure(log_text: str) -> Failure:
-    """Find the first known error in the log. Order matters: install errors come first."""
+    """Find the first known error in the log.
+
+    Order matters: errors with a known code fix come first, network trouble comes last,
+    because a log can contain a harmless retry warning and a real error at the same time."""
     text = clean(log_text)
 
     match = _BAD_PIN.search(text)
@@ -74,6 +87,10 @@ def extract_failure(log_text: str) -> Failure:
         # above the "FAILED ..." summary line.
         excerpt = _excerpt(text, match.start(), before=60, after=5)
         return Failure(TEST_FAILURE, match.group(1), excerpt, _files_in(excerpt))
+
+    match = _TRANSIENT.search(text)
+    if match:
+        return Failure(TRANSIENT, match.group(0), _excerpt(text, match.start(), before=10, after=5))
 
     error_at = text.find("##[error]")
     position = error_at if error_at != -1 else max(0, len(text) - 1)

@@ -1,5 +1,3 @@
-import json
-
 from medic.config import Config
 from medic.diagnose import llm_based, rule_based
 from medic.log_parser import BAD_PIN, MISSING_MODULE, TEST_FAILURE, Failure
@@ -31,17 +29,6 @@ def test_test_failure_has_no_rule():
     assert rule_based(Failure(TEST_FAILURE, "t.py::test_x", ""), {"demo-app/app/x.py": "a = 1\n"}) is None
 
 
-class FakeResponse:
-    def __init__(self, content: str):
-        self._content = content
-
-    def raise_for_status(self):
-        pass
-
-    def json(self):
-        return {"choices": [{"message": {"content": self._content}}]}
-
-
 def llm_config() -> Config:
     return Config(llm_base_url="http://llm.test/v1", llm_api_key="k", llm_model="m")
 
@@ -50,9 +37,8 @@ FILES = {"demo-app/app/pricing.py": "x = amount >= LIMIT\ny = 2\n"}
 FAILURE = Failure(TEST_FAILURE, "demo-app/tests/test_pricing.py::test_a", "AssertionError")
 
 
-def fake_post(answer):
-    content = answer if isinstance(answer, str) else json.dumps(answer)
-    return lambda *args, **kwargs: FakeResponse(content)
+def answering(answer):
+    return lambda system, user, cfg: answer
 
 
 def test_llm_edit_is_applied():
@@ -60,32 +46,34 @@ def test_llm_edit_is_applied():
         "root_cause": "Delivery is checked on the wrong value.",
         "edits": [{"path": "demo-app/app/pricing.py", "search": "amount >= LIMIT", "replace": "discounted >= LIMIT"}],
     }
-    plan = llm_based(FAILURE, FILES, llm_config(), post=fake_post(answer))
+    plan = llm_based(FAILURE, FILES, llm_config(), ask=answering(answer))
     assert plan.source == "llm"
     assert plan.changes[0].new == "x = discounted >= LIMIT\ny = 2\n"
 
 
-def test_llm_answer_inside_a_code_fence_is_read():
-    answer = '```json\n{"root_cause": "r", "edits": [{"path": "demo-app/app/pricing.py", "search": "y = 2", "replace": "y = 3"}]}\n```'
-    assert llm_based(FAILURE, FILES, llm_config(), post=fake_post(answer)) is not None
-
-
 def test_llm_edit_that_does_not_match_the_file_is_dropped():
     answer = {"root_cause": "r", "edits": [{"path": "demo-app/app/pricing.py", "search": "not in file", "replace": "z"}]}
-    assert llm_based(FAILURE, FILES, llm_config(), post=fake_post(answer)) is None
+    assert llm_based(FAILURE, FILES, llm_config(), ask=answering(answer)) is None
 
 
 def test_llm_edit_to_a_file_it_was_not_given_is_dropped():
     answer = {"root_cause": "r", "edits": [{"path": ".github/workflows/ci.yml", "search": "a", "replace": "b"}]}
-    assert llm_based(FAILURE, FILES, llm_config(), post=fake_post(answer)) is None
+    assert llm_based(FAILURE, FILES, llm_config(), ask=answering(answer)) is None
 
 
-def test_llm_garbage_answer_gives_no_plan():
-    assert llm_based(FAILURE, FILES, llm_config(), post=fake_post("sorry, I cannot help")) is None
+def test_llm_answer_that_is_not_an_object_gives_no_plan():
+    assert llm_based(FAILURE, FILES, llm_config(), ask=answering(["not", "a", "dict"])) is None
+
+
+def test_llm_error_gives_no_plan():
+    def failing(system, user, cfg):
+        raise ConnectionError("model is down")
+
+    assert llm_based(FAILURE, FILES, llm_config(), ask=failing) is None
 
 
 def test_llm_is_skipped_without_a_key():
-    def must_not_be_called(*args, **kwargs):
+    def must_not_be_called(system, user, cfg):
         raise AssertionError("LLM was called without a key")
 
-    assert llm_based(FAILURE, FILES, Config(), post=must_not_be_called) is None
+    assert llm_based(FAILURE, FILES, Config(), ask=must_not_be_called) is None

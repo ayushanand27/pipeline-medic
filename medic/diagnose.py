@@ -5,10 +5,7 @@ Two layers:
 2. An LLM for everything else (for example a failing test). It is optional.
 """
 
-import json
 import re
-
-import requests
 
 from .config import Config
 from .log_parser import BAD_PIN, MISSING_MODULE, Failure
@@ -76,40 +73,24 @@ Each "search" must be copied exactly from the file and must appear only once in 
 If you are not sure, return an empty "edits" list."""
 
 
-def _parse_json(content: str) -> dict:
-    content = content.strip()
-    if content.startswith("```"):
-        content = content.strip("`")
-        content = content[content.find("{") :]
-    start, end = content.find("{"), content.rfind("}")
-    return json.loads(content[start : end + 1])
+def llm_based(failure: Failure, files: dict[str, str], cfg: Config, ask=None) -> Plan | None:
+    """Ask the LLM. Returns None if it is off, fails, or gives nothing usable.
 
-
-def llm_based(failure: Failure, files: dict[str, str], cfg: Config, post=None) -> Plan | None:
-    """Ask the LLM. Returns None if it is off, fails, or gives nothing usable."""
+    `ask(system, user, cfg)` returns the model's answer as a dict. The default is the
+    LangChain chain in llm_chain.py. Tests pass their own.
+    """
     if not cfg.llm_enabled or not files:
         return None
 
     file_blocks = "\n\n".join(f"--- {path} ---\n{text}" for path, text in files.items())
     user_prompt = f"Failed check: {failure.detail}\n\nLog:\n{failure.excerpt}\n\nFiles:\n{file_blocks}"
-    post = post or requests.post
     try:
-        response = post(
-            f"{cfg.llm_base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {cfg.llm_api_key}"},
-            json={
-                "model": cfg.llm_model,
-                "temperature": 0,
-                "messages": [
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-            },
-            timeout=60,
-        )
-        response.raise_for_status()
-        answer = _parse_json(response.json()["choices"][0]["message"]["content"])
-    except (requests.RequestException, KeyError, IndexError, ValueError) as error:
+        if ask is None:
+            from .llm_chain import ask
+        answer = ask(_SYSTEM_PROMPT, user_prompt, cfg)
+        if not isinstance(answer, dict):
+            raise ValueError("the model did not return a JSON object")
+    except Exception as error:  # network, bad JSON, missing package: never crash the run
         print(f"medic: LLM step failed: {error}")
         return None
 

@@ -39,7 +39,7 @@ flowchart LR
 3. **Parse.** `log_parser.py` uses plain regex to pull out what failed. This step is not an LLM, so it is cheap and gives the same answer every time.
 4. **Decide.** There are three possible responses:
    - **Retry.** A timeout, a DNS error or a rate limit is not a code problem. The agent restarts the failed jobs once. If they fail again, it opens an issue.
-   - **Fix.** `diagnose.py` has two layers. Rules handle errors with one known fix (a package missing from `requirements.txt`, or a package pinned to a version that does not exist). An optional LLM handles everything else, like a failing test. It gets the error and the files involved and must answer with exact search-and-replace edits.
+   - **Fix.** `diagnose.py` has two layers. Rules handle errors with one known fix (a package missing from `requirements.txt`, or a package pinned to a version that does not exist). An optional LLM handles everything else, like a failing test. That step is a LangChain chain (`llm_chain.py`: prompt, chat model, JSON parser). It gets the error and the files involved and must answer with exact search-and-replace edits.
    - **Escalate.** If there is no safe fix, the agent opens an issue with the diagnosis and changes nothing.
 5. **Guardrails.** `guard.py` checks every plan in code before anything is written (see below).
 6. **Verify.** `verify.py` applies the fix to a clean copy of the failing commit, in a fresh virtual environment, and runs the project's own check command. Only a fix that makes the check pass becomes a pull request. A fix that fails goes into an issue instead.
@@ -225,6 +225,7 @@ uv pip compile demo-app/requirements.txt --python-version 3.12 --no-header --gen
 medic/                 the agent
   log_parser.py        raw log -> structured failure (regex)
   diagnose.py          rules first, optional LLM second
+  llm_chain.py         the LLM step as a LangChain chain (prompt -> model -> JSON parser)
   guard.py             safety checks on every plan
   github_client.py     GitHub REST API calls
   verify.py            apply the fix to a clean copy and run the project's check
@@ -235,7 +236,7 @@ medic/                 the agent
 evals/                 12 failed-build cases and the expected response for each
 policy/                OPA rules for a release, with their own tests
 action.yml             the agent as a reusable GitHub Action
-tests/                 97 tests (96% coverage), with real captured failure logs as fixtures
+tests/                 102 tests (96% coverage), with real captured failure logs as fixtures
 demo-app/              small FastAPI service the pipeline builds, tests and deploys
 deploy/                Terraform (cluster), Kubernetes manifests (app + Prometheus), deploy, verify, metric check and rollback drill scripts
 scripts/plant_bug.py   breaks the demo app on purpose, three ways
@@ -244,7 +245,7 @@ scripts/plant_bug.py   breaks the demo app on purpose, three ways
 
 ## Tests
 
-- **97 agent tests, 96% line coverage.** CI fails under 90%. They cover log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, the whole loop against a fake GitHub, fix verification against a real temporary git repository, retries, the triage and exploit ranking, the metric check, and the MCP server through a real MCP client.
+- **102 agent tests, 96% line coverage.** CI fails under 90%. They cover log parsing on real captured logs, both rule-based fixes, LLM answers that are good, malformed or unsafe, every guardrail, the whole loop against a fake GitHub, fix verification against a real temporary git repository, retries, the triage and exploit ranking, the metric check, and the MCP server through a real MCP client.
 - **12 evaluation cases.** See above.
 - **Lint.** `ruff` with its security rules runs on every push.
 - **10 policy tests.** One for a good release and one for each rule.
@@ -254,7 +255,7 @@ scripts/plant_bug.py   breaks the demo app on purpose, three ways
 ## Known limits
 
 - The rules cover two Python dependency errors. Other failures need the LLM step or end as an issue.
-- The LLM step is tested with recorded answers, not yet against a live model.
+- The LLM step (LangChain) is tested with a fake chat model, not yet against a live model.
 - Only Python projects and pytest output are understood today.
 - Verification runs on the CI runner, not in a locked-down sandbox. It gets no secrets, but it does have network access.
 - The cluster is a local kind cluster, not a cloud cluster (EKS, GKE, AKS).

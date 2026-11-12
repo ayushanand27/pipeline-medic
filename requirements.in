@@ -1,5 +1,7 @@
 requests
 pyyaml
+langchain-core
+langchain-openai
 pytest
 pytest-cov
 ruff

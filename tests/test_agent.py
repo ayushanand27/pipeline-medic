@@ -1,10 +1,8 @@
 """End-to-end tests of the agent loop against a fake GitHub (no network)."""
 
-import json
 from pathlib import Path
 
 from medic import agent
-from medic import diagnose as diagnose_module
 from medic.agent import handle_run
 from medic.config import Config
 from medic.github_client import PullRequestsNotAllowed
@@ -117,22 +115,14 @@ def test_test_failure_with_llm_gets_a_pull_request(monkeypatch):
     }
     seen = {}
 
-    class Response:
-        def raise_for_status(self):
-            pass
+    def fake_ask(system, user, cfg):
+        seen["prompt"] = user
+        return {
+            "root_cause": "Free delivery is checked on the price before the coupon.",
+            "edits": [{"path": "demo-app/app/pricing.py", "search": "0 if amount >=", "replace": "0 if discounted >="}],
+        }
 
-        def json(self):
-            answer = {
-                "root_cause": "Free delivery is checked on the price before the coupon.",
-                "edits": [{"path": "demo-app/app/pricing.py", "search": "0 if amount >=", "replace": "0 if discounted >="}],
-            }
-            return {"choices": [{"message": {"content": json.dumps(answer)}}]}
-
-    def fake_post(url, **kwargs):
-        seen["prompt"] = kwargs["json"]["messages"][1]["content"]
-        return Response()
-
-    monkeypatch.setattr(diagnose_module.requests, "post", fake_post)
+    monkeypatch.setattr("medic.llm_chain.ask", fake_ask)
     cfg = Config(llm_base_url="http://llm.test/v1", llm_api_key="k", llm_model="m")
     gh = FakeGitHub("test_failure.log", files)
 
